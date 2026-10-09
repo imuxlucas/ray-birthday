@@ -1,5 +1,5 @@
 /* A little sunshine, for Ray — p5.js / Processing-inspired WEBGL.
-   Fixed 1000 × 1500 portrait drawing buffer (2:3). World units = pixels, seconds, y up.
+   Viewport-sized canvas; a 1500-unit reference height keeps the artwork proportional. World units = pixels, seconds, y up.
    Both rendering and physics use the same two capped cylinders. */
 const W=1000,H=1500, CX=604,CY=1235, S=.877268488, C=.48;
 const SUN={x:240,y:205,radius:105,angle:-.48,flatten:.60,depth:.8/1120};
@@ -20,9 +20,10 @@ let portraits={},back,front,glowTex,sunTex,topTex,lowerTopTex,upperSideTex,lower
 let stats={collisions:0,emitted:0,fallen:0};
 let targetPath=[],glowSprites=[],avatarHalo;
 const PATH_SAMPLES=256;
+let typographyReady=false;
 const VERT=`precision highp float; attribute vec3 aPosition; void main(){gl_Position=vec4(aPosition.xy,0.,1.);}`;
 const FRAG=`precision highp float;
-uniform vec2 resolution; uniform float time; uniform vec3 lightPos; uniform vec3 target;
+uniform vec2 resolution; uniform vec2 sceneSize; uniform float time; uniform vec3 lightPos; uniform vec3 target;
 uniform vec3 beamDualU; uniform vec3 beamDualV; uniform vec3 beamDualAxis; uniform vec2 coneShape; uniform vec2 cakeOrigin; uniform vec3 lowerTier; uniform vec3 upperTier; uniform vec4 sunPose;
 uniform sampler2D glowLayer; uniform sampler2D sunLayer; uniform sampler2D backLayer; uniform sampler2D frontLayer; uniform sampler2D lowerTopLayer; uniform sampler2D topLayer; uniform sampler2D upperSideLayer; uniform sampler2D lowerLayer;
 const float S=.877268488; const float C=.48;
@@ -75,7 +76,8 @@ float beamVolume(vec3 origin,vec3 direction,float surfaceT){
  float stride=(finish-start)/6.,density=0.;vec3 apex=lightPos-axis*(coneShape.x/coneShape.y);
  for(int i=0;i<6;i++){
   float sampleT=start+(float(i)+.5)*stride;vec3 q=o+d*sampleT;
-  float radius=coneShape.x+q.z*coneShape.y,weight=1.-smoothstep(radius*.30,radius,length(q.xy));
+  // A broad, faint volume reaches the filament outline; feather only the outer rim.
+  float radius=coneShape.x+q.z*coneShape.y,weight=1.-smoothstep(radius*(1.-.16*.20),radius,length(q.xy));
   vec3 samplePos=origin+direction*sampleT;
   // Above the upper cap there can be no cake blocking the source.
   if(samplePos.y<upperTier.z){
@@ -86,10 +88,16 @@ float beamVolume(vec3 origin,vec3 direction,float surfaceT){
   }
   density+=weight*stride;
  }
- return 1.-exp(-density*.00105);
+ // Lower overall density balances the wider fill, keeping the centre transparent.
+ return 1.-exp(-density*.00072);
 }
 void main(){
- vec2 p=vec2(gl_FragCoord.x,resolution.y-gl_FragCoord.y);vec2 uv=p/resolution;
+ // The canvas has the viewport aspect ratio. Centre the original composition
+ // in it using only height for scale, so wider windows reveal more black space.
+ vec2 pixel=vec2(gl_FragCoord.x,resolution.y-gl_FragCoord.y);
+ vec2 p=(pixel-resolution*.5)*(sceneSize.y/resolution.y)+sceneSize*.5;
+ vec2 uv=p/sceneSize;
+ bool inOverlay=all(greaterThanEqual(uv,vec2(0.)))&&all(lessThanEqual(uv,vec2(1.)));
  // Pure black matches the surrounding immersive page.
  vec3 sky=vec3(0.);
  vec3 col=sky;
@@ -238,32 +246,53 @@ void main(){
  col=mix(col,vec3(1.),lettering.a*textBreath*(.28+.72*reveal));
  }
  // Warm participating light fills the cone, stopping at the actual cake surface.
- float mist=beamVolume(origin,dir,t);
+ // Restore the broad atmospheric fill at 60% of its previous opacity.
+ float mist=beamVolume(origin,dir,t)*.60;
  // Add luminous scattering without replacing blue with an opaque yellow mixture.
  col=1.-(1.-col)*(1.-vec3(1.)*mist*.64);
  // Ray fragments already respect camera occlusion; composite them in front of the cake.
- vec4 bg=texture2D(backLayer,uv);col=col*(1.-bg.a)+bg.rgb;
+ vec4 bg=inOverlay?texture2D(backLayer,uv):vec4(0.);col=col*(1.-bg.a)+bg.rgb;
  // Inverse homography: every sun portrait lies on one tilted perspective plane.
  vec2 sp=p-sunPose.xy;float ca=cos(sunPose.z),sa=sin(sunPose.z);
  vec2 planeCoord=vec2(ca*sp.x+sa*sp.y,-sa*sp.x+ca*sp.y);
  float py=planeCoord.y/(sunPose.w+planeCoord.y*(.8/1120.));
  float scale=1./(1.-py*(.8/1120.));
  vec2 suv=(vec2(planeCoord.x/scale,py)+320.)/640.;
- vec3 bloom=texture2D(glowLayer,uv).rgb;
+ vec3 bloom=inOverlay?texture2D(glowLayer,uv).rgb:vec3(0.);
  col=1.-(1.-col)*(1.-bloom*.65);
- vec4 fg=texture2D(frontLayer,uv);col=col*(1.-fg.a)+fg.rgb;
+ vec4 fg=inOverlay?texture2D(frontLayer,uv):vec4(0.);col=col*(1.-fg.a)+fg.rgb;
  // Portraits and names occlude hearts, trails and bloom; the empty centre remains transparent.
  if(all(greaterThanEqual(suv,vec2(0.)))&&all(lessThanEqual(suv,vec2(1.)))){vec4 sun=texture2D(sunLayer,suv);col=col*(1.-sun.a)+sun.rgb;}
  gl_FragColor=vec4(col,1.);
 }`;
 function preload(){for(const name of [...FRIENDS,'ray'])portraits[name]=loadImage((window.INLINE_ASSETS||{})[name]||'assets/'+name+'.png');}
+function viewportCanvasSize(){
+ const rect=document.getElementById('stage').getBoundingClientRect();
+ const cssHeight=Math.max(1,rect.height),aspect=Math.max(1,rect.width)/cssHeight;
+ // Bound pixel cost on wide and Retina screens without imposing an aspect ratio.
+ const renderHeight=Math.max(1,Math.round(Math.min(H,cssHeight*Math.min(window.devicePixelRatio||1,2),Math.sqrt(2400000/aspect))));
+ return{w:Math.max(1,Math.round(renderHeight*aspect)),h:renderHeight};
+}
+function resizeSceneCanvas(){
+ if(!canvasEl)return;
+ const size=viewportCanvasSize();
+ if(width===size.w&&height===size.h)return;
+ resizeCanvas(size.w,size.h,true);if(paused)redraw();
+}
+function windowResized(){resizeSceneCanvas();}
 function setup(){
  pixelDensity(1);setAttributes({alpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:true});
- canvasEl=createCanvas(W,H,WEBGL).parent('stage').elt;noStroke();
+ const size=viewportCanvasSize();canvasEl=createCanvas(size.w,size.h,WEBGL).parent('stage').elt;noStroke();
+ new ResizeObserver(resizeSceneCanvas).observe(document.getElementById('stage'));
  back=createGraphics(W,H);front=createGraphics(W,H);glowTex=createGraphics(Math.ceil(W/3),Math.ceil(H/3));sunTex=createGraphics(640,640);topTex=createGraphics(1024,1024);lowerTopTex=createGraphics(1024,1024);upperSideTex=createGraphics(2048,1024);lowerTex=createGraphics(2048,1024);
  for(const g of [back,front,glowTex,sunTex,topTex,lowerTopTex,upperSideTex,lowerTex])g.pixelDensity(1);
  buildCaches();buildHeroCandles();frameRate(60);
- makeTop(topTex,true);makeTop(lowerTopTex,false);makeSide(upperSideTex,TIERS[1],30);makeSide(lowerTex,TIERS[0],32);program=createShader(VERT,FRAG);
+ makeTop(topTex,true);makeTop(lowerTopTex,false);program=createShader(VERT,FRAG);
+ // Bake canvas lettering after the selected typeface is ready.
+ document.fonts.load('400 30px Georgia').then(()=>{
+  makeSide(upperSideTex,TIERS[1],30);makeSide(lowerTex,TIERS[0],32);
+  typographyReady=true;
+ });
  document.getElementById('pause').onclick=togglePause;
  document.addEventListener('visibilitychange',()=>{if(document.hidden)noLoop();else if(!paused)loop();});
  document.getElementById('save').onclick=()=>saveCanvas('sunshine-for-ray','png');
@@ -277,9 +306,11 @@ function setup(){
 function togglePause(){paused=!paused;document.getElementById('pause').textContent=paused?'播放':'暂停';if(paused)noLoop();else loop();}
 function project(p){return {x:CX+p.x,y:CY-S*p.y+C*p.z};}
 // Sweep toward the visible front and both sides, keeping the upper top in the footprint.
+// Front-only round trip: left, left-front, front, right-front, right, then back.
+// Mirrored neighbours give both turnaround points a smooth, zero-speed reversal.
 const LIGHT_SURFACE_PATH=[
- {x:-45,y:283,z:35},{x:15,y:275,z:80},{x:75,y:282,z:45},
- {x:45,y:293,z:-30},{x:-45,y:293,z:-35},{x:-75,y:282,z:50}
+ {x:-75,y:282,z:20},{x:-45,y:280,z:60},{x:0,y:275,z:80},{x:45,y:280,z:60},
+ {x:75,y:282,z:20},{x:45,y:280,z:60},{x:0,y:275,z:80},{x:-45,y:280,z:60}
 ];
 function solveTarget(t){
  const phase=((t*LIGHT_SWEEP_SPEED/(Math.PI*2))%1+1)%1*LIGHT_SURFACE_PATH.length;
@@ -460,8 +491,7 @@ function drawSun(t){let c=sunTex.drawingContext;sunTex.clear();c.save();c.transl
  for(const f of friends){c.save();c.globalAlpha=.46+.17*Math.sin(t*.85+f.a*.3);c.drawImage(avatarHalo.canvas,f.x-57,f.y-57,114,114);c.restore();}
  for(const f of friends){circlePortrait(c,portraits[f.name],f.x,f.y,39,uprightPortraitAngle(f.x,f.y));}
  c.restore();
- // Names follow the same projected orbit, kept upright and outside the overlap.
- c=front.drawingContext;for(const f of friends){let q=ellipsePoint(f.a,160);c.font='400 16px Georgia, serif';c.textAlign='center';c.textBaseline='middle';c.fillStyle='#ffffff';c.fillText(f.name,q.x,q.y+1);}
+ // Names appear only as travelling light, emitted beneath their own portrait.
 }
 function coneFrame(target){
  const unit=v=>{let l=Math.hypot(v.x,v.y,v.z);return{x:v.x/l,y:v.y/l,z:v.z/l};};
@@ -739,11 +769,11 @@ function drawDreamGlow(t,target){
  g.restore();
 }
 
-function draw(){if(!program)return;let dt=Math.min(deltaTime/1000,.08);if(!paused){accumulator+=dt;while(accumulator>=PHYSICS.step){clockTime+=PHYSICS.step;stepPhysics(PHYSICS.step,clockTime);accumulator-=PHYSICS.step;}}
+function draw(){if(!program||!typographyReady)return;let dt=Math.min(deltaTime/1000,.08);if(!paused){accumulator+=dt;while(accumulator>=PHYSICS.step){clockTime+=PHYSICS.step;stepPhysics(PHYSICS.step,clockTime);accumulator-=PHYSICS.step;}}
  back.clear();front.clear();let target=targetAt(clockTime);drawSilk(clockTime,target);drawSun(clockTime);drawSurfaceGlints(clockTime,target);drawDreamGlow(clockTime,target);drawHeroCandles(target);drawPoeticLight(clockTime);drawParticles();
- shader(program);program.setUniform('resolution',[W,H]);program.setUniform('glowLayer',glowTex);const dual=beamDuals(target);program.setUniform('beamDualU',dual[0]);program.setUniform('beamDualV',dual[1]);program.setUniform('beamDualAxis',dual[2]);program.setUniform('coneShape',[CONE.aperture,CONE.spread]);program.setUniform('cakeOrigin',[CX,CY]);program.setUniform('lowerTier',[TIERS[0].r,TIERS[0].lo,TIERS[0].hi]);program.setUniform('upperTier',[TIERS[1].r,TIERS[1].lo,TIERS[1].hi]);program.setUniform('sunPose',[SUN.x,SUN.y,SUN.angle,SUN.flatten]);program.setUniform('sunLayer',sunTex);program.setUniform('time',clockTime);program.setUniform('lightPos',[SOURCE.x,SOURCE.y,SOURCE.z]);program.setUniform('target',[target.x,target.y,target.z]);program.setUniform('backLayer',back);program.setUniform('frontLayer',front);program.setUniform('topLayer',topTex);program.setUniform('lowerTopLayer',lowerTopTex);program.setUniform('upperSideLayer',upperSideTex);program.setUniform('lowerLayer',lowerTex);
+ shader(program);program.setUniform('resolution',[width,height]);program.setUniform('sceneSize',[W,H]);program.setUniform('glowLayer',glowTex);const dual=beamDuals(target);program.setUniform('beamDualU',dual[0]);program.setUniform('beamDualV',dual[1]);program.setUniform('beamDualAxis',dual[2]);program.setUniform('coneShape',[CONE.aperture,CONE.spread]);program.setUniform('cakeOrigin',[CX,CY]);program.setUniform('lowerTier',[TIERS[0].r,TIERS[0].lo,TIERS[0].hi]);program.setUniform('upperTier',[TIERS[1].r,TIERS[1].lo,TIERS[1].hi]);program.setUniform('sunPose',[SUN.x,SUN.y,SUN.angle,SUN.flatten]);program.setUniform('sunLayer',sunTex);program.setUniform('time',clockTime);program.setUniform('lightPos',[SOURCE.x,SOURCE.y,SOURCE.z]);program.setUniform('target',[target.x,target.y,target.z]);program.setUniform('backLayer',back);program.setUniform('frontLayer',front);program.setUniform('topLayer',topTex);program.setUniform('lowerTopLayer',lowerTopTex);program.setUniform('upperSideLayer',upperSideTex);program.setUniform('lowerLayer',lowerTex);
  beginShape(TRIANGLE_STRIP);vertex(-1,-1,0);vertex(1,-1,0);vertex(-1,1,0);vertex(1,1,0);endShape();}
 async function recordClip(){if(recording)return;const status=document.getElementById('status');if(!canvasEl.captureStream||!window.MediaRecorder){status.textContent='此浏览器不支持录制，请使用 Chrome。';return;}if(paused)togglePause();recording=true;const button=document.getElementById('record');button.disabled=true;
  let mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/mp4'].find(m=>MediaRecorder.isTypeSupported(m));let stream=canvasEl.captureStream(30);const musicTrack=window.rayMusic?.recordingTrack();if(musicTrack)stream.addTrack(musicTrack);let rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:10000000}),chunks=[];
- rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};rec.onstop=()=>{let blob=new Blob(chunks,{type:rec.mimeType}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='Happy-Birthday-Ray.'+(rec.mimeType.includes('mp4')?'mp4':'webm');a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);stream.getTracks().forEach(t=>t.stop());recording=false;button.disabled=false;status.textContent='录制完成 · 1000 × 1500';};rec.start();let remaining=12;status.textContent='正在录制 · '+remaining+' 秒';let interval=setInterval(()=>{remaining--;status.textContent='正在录制 · '+remaining+' 秒';if(remaining<=0){clearInterval(interval);rec.stop();}},1000);}
+ rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};rec.onstop=()=>{let blob=new Blob(chunks,{type:rec.mimeType}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='Happy-Birthday-Ray.'+(rec.mimeType.includes('mp4')?'mp4':'webm');a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);stream.getTracks().forEach(t=>t.stop());recording=false;button.disabled=false;status.textContent='录制完成 · '+width+' × '+height;};rec.start();let remaining=12;status.textContent='正在录制 · '+remaining+' 秒';let interval=setInterval(()=>{remaining--;status.textContent='正在录制 · '+remaining+' 秒';if(remaining<=0){clearInterval(interval);rec.stop();}},1000);}
 window.addEventListener('error',e=>{let el=document.getElementById('error');el.style.display='block';el.textContent='动画未能载入：'+e.message;});

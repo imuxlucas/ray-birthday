@@ -3,14 +3,14 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">
 <title>A little sunshine, for Ray</title>
 <style>
+body,button{font-family:Georgia,serif}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
-body{height:100vh;height:100dvh;display:grid;place-items:center}
-main{flex:none;width:min(100vw,66.666667vh);width:min(100vw,66.666667dvh);aspect-ratio:2/3;line-height:0;background:#000}
-canvas{display:block;width:100%!important;height:100%!important;aspect-ratio:2/3}
+body{height:100vh;height:100dvh;}
+main{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;line-height:0;background:#000}
+canvas{display:block;flex:none;width:100%!important;height:100%!important;max-width:none;max-height:none;}
 footer,[hidden],#error{display:none!important}
-main:fullscreen{width:100%;height:100%;aspect-ratio:auto;display:grid;place-items:center;background:#000}
-main:fullscreen canvas{width:min(100vw,66.666667vh)!important;height:auto!important;max-height:100vh}
+main:fullscreen{width:100vw;height:100vh;height:100dvh;}
 </style></head>
-<body><main id="stage" aria-label="Ray 的生日动画：九位朋友围绕太阳旋转，黑夜中白色丝线照向粉蓝装饰的奶白色双层蛋糕，爱心在碰撞后落下。"><div id="error" role="alert"></div></main><footer hidden aria-hidden="true"><span id="status">A LITTLE SUNSHINE, FOR RAY · 1000 × 1500 · 2:3</span><nav aria-label="动画控制"><button id="pause">暂停</button><button id="music" aria-pressed="false">♫ 开启音乐</button><button id="save">保存画面</button><button id="record">录制 12 秒</button><button id="full">全屏</button></nav></footer>
-<script src="vendor/p5.min.js"></script><script src="sketch.js?v=62"></script><script src="hero-candles.js?v=12"></script><script src="poetry.js?v=2"></script><script src="music.js?v=3"></script></body></html>
+<body><main id="stage" aria-label="Ray 的生日动画：九位朋友围绕太阳旋转，黑夜中白色丝线照向粉蓝装饰的奶白色双层蛋糕，爱心在碰撞后落下。"><div id="error" role="alert"></div></main><footer hidden aria-hidden="true"><span id="status">A LITTLE SUNSHINE, FOR RAY</span><nav aria-label="动画控制"><button id="pause">暂停</button><button id="music" aria-pressed="false">♫ 开启音乐</button><button id="save">保存画面</button><button id="record">录制 12 秒</button><button id="full">全屏</button></nav></footer>
+<script src="vendor/p5.min.js"></script><script src="sketch.js?v=73"></script><script src="hero-candles.js?v=12"></script><script src="poetry.js?v=8"></script><script src="music.js?v=3"></script></body></html>
